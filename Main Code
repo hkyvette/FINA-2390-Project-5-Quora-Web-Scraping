@@ -1,0 +1,133 @@
+#encoding=utf-8
+from selenium import webdriver
+from urllib.parse import urljoin
+from lxml import etree
+import csv
+import time
+import os
+import sys
+
+driver = webdriver.Chrome('/Users/Yvette/chromedriver')
+
+que_list = 'que.txt'
+ques = set()
+with open(que_list,'r') as f:
+    for line in f.readlines():
+        line = line.strip()
+        #print repr(line)
+        if len(line):
+             ques.add(line)
+
+
+def getQuestions(keyword,max_page=5):
+    url = 'https://www.quora.com/search?q=%s&type=question' % keyword
+    bw=webdriver.Chrome()
+    bw.get(url)
+    for i in range(max_page):
+        try:
+            bw.execute_script("window.scrollBy(0,10000000)")
+        except:
+            pass
+        time.sleep(4)
+    html =  bw.page_source
+    bw.close()
+    return html
+
+#getQuestions("hello")
+
+
+def getQuestionDetail(bw,url):
+    #try:
+    #    bw.delete_all_cookies()
+    #except:
+    #    pass
+    print ('getting:',url)
+    bw.get(url)
+    answers = 0
+    while True:
+        if answers == len(bw.find_elements_by_xpath('//div[@class="pagedlist_item"]')):
+            break
+        answers = len(bw.find_elements_by_xpath('//div[@class="pagedlist_item"]'))
+        try:
+            bw.execute_script("window.scrollBy(0,10000000)")
+        except:
+            break
+        time.sleep(4)
+    return bw.page_source
+
+def extarct_answers(html):
+    html = etree.HTML(html)
+    answers=[]
+    for div in html.xpath('//div[contains(@class,"pagedlist_item")]'):
+        try:
+            answer={}
+
+            answer['author_name'] = div.xpath('.//a[@class="user"]/text()')[0]
+            answer['author_info'] = ''
+            answer['content']= ''
+            try:
+                answer['author_info'] =div.xpath('.//span[contains(@class,"NameCredential")]/text()')[0]
+            except Exception as e:
+                pass#print e
+            try:
+                answer['content'] = ''.join(div.xpath('.//p[contains(@class,"qtext")]//text()'))
+            except Exception as e:
+                print(e)
+            if answer['content']==None or answer['content']=='':
+                try:
+                    answer['content'] = ''.join(div.xpath('.//span[@class="rendered_qtext"]//text()'))
+                except Exception as e:
+                    print(e)
+            if answer['content'] == None or answer['content'] == '':
+                try:
+                    answer['content'] = ''.join(div.xpath('.//span[@class="rendered_qtext"]//text()'))
+                except Exception as e:
+                    print(e)
+            try:
+                answer['upvote'] = div.xpath('.//a[contains(@class,"VoterListModalLink")]/text()')[0]
+            except:
+                answer['upvote'] =''
+            for x in answer:
+                #print(x,type(answer[x]))
+                answer[x] = str(answer[x])
+            answers.append(answer)
+        except Exception as e:
+            print(e)
+    return answers
+
+Question_Bw = webdriver.Chrome()
+
+def write_csv(que):
+    title = que['title']
+    with open('%s.csv' % que['que'], 'a',newline="",encoding='utf-8') as csv_file:
+        FIELDS = ['title', 'author_name', 'author_info', 'content', 'upvote']
+        writer = csv.DictWriter(csv_file, fieldnames=FIELDS)
+        if not os.path.exists('%s.csv' % que['que']):
+            writer.writerow(dict(zip(FIELDS, FIELDS)))
+        for answer in que['answers']:
+            answer['title'] = title
+            writer.writerow(answer)
+
+for que in ques:
+    html_str = getQuestions(que,2)
+    html = etree.HTML(html_str)
+    que_url = 'https://www.quora.com/search?q=%s&type=question' % que
+    for div in html.xpath('//div[contains(@class,"pagedlist_item")]'):
+        try:
+            a = div.xpath('.//a[@class="question_link"]')[0]
+            url = urljoin(que_url,a.xpath('@href')[0])
+            title = ''.join(a.xpath('.//text()'))
+            #print(url,title)
+            html = getQuestionDetail(Question_Bw,url)
+            answers = extarct_answers(html)
+            #print url,title
+            #print(answers)
+            write_csv({
+                'title':title,
+                'que':que,
+                'answers':answers
+            })
+        except Exception as e:
+            print(e,sys.exc_info()[-1].tb_lineno)
+
+Question_Bw.close()
